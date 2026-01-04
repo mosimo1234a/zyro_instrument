@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gemini Toss Synth</title>
+    <style>
+        :root {
+            --toss-blue: #3182f6;
+            --gemini-grad: linear-gradient(135deg, #4285f4, #9b72cb, #d96570);
+            --bg-color: #f2f4f6;
+        }
+        body {
+            margin: 0; overflow: hidden; background: var(--bg-color);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            touch-action: none; color: #191f28;
+        }
+        canvas { position: absolute; top: 0; left: 0; z-index: 1; }
+        #ui {
+            position: relative; z-index: 2; height: 100vh;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            pointer-events: none;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(20px);
+            padding: 40px; border-radius: 32px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.05);
+            text-align: center; width: 80%; max-width: 300px;
+        }
+        #startBtn {
+            pointer-events: auto; padding: 16px 32px; font-size: 18px; font-weight: 600;
+            background: var(--toss-blue); color: white; border: none;
+            border-radius: 16px; cursor: pointer; transition: transform 0.2s;
+        }
+        #startBtn:active { transform: scale(0.95); }
+        #noteDisplay {
+            font-size: 64px; font-weight: 800; margin: 20px 0;
+            background: var(--gemini-grad);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .guide { font-size: 14px; color: #8b95a1; line-height: 1.6; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="ui">
+        <div class="card">
+            <button id="startBtn">연주 시작하기</button>
+            <div id="noteDisplay">C4</div>
+            <p class="guide">기울여서 음을 찾고<br>화면을 눌러 소리를 내세요</p>
+        </div>
+    </div>
+
+    <script>
+        let audioCtx, osc, gain;
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const noteDisplay = document.getElementById('noteDisplay');
+        let beta = 30, gamma = 0, isTouching = false;
+
+        const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+
+        function initAudio() {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            osc = audioCtx.createOscillator();
+            gain = audioCtx.createGain();
+            osc.type = 'sine'; // 토스처럼 깔끔한 사인파
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start();
+        }
+
+        window.addEventListener('deviceorientation', (e) => {
+            beta = e.beta || 30; gamma = e.gamma || 0;
+            updateSynth();
+        });
+
+        function updateSynth() {
+            if (!osc) return;
+            let b = Math.max(10, Math.min(60, beta));
+            let noteIdx = Math.max(0, Math.min(11, Math.floor(((b - 10) / 50) * 12)));
+            let g = Math.max(-30, Math.min(30, gamma));
+            let oct = Math.max(3, Math.min(5, Math.floor(((g + 30) / 60) * 3) + 3));
+
+            const freq = 440 * Math.pow(2, (noteIdx + (oct - 4) * 12 - 9) / 12);
+            osc.frequency.setTargetAtTime(freq, audioCtx.currentTime, 0.1);
+            if (isTouching) noteDisplay.innerText = `${notes[noteIdx]}${oct}`;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const activeX = ((gamma + 30) / 60) * canvas.width;
+            const activeY = (1 - (beta - 10) / 50) * canvas.height;
+
+            // 격자 그리기 (토스 스타일의 아주 연한 선)
+            ctx.strokeStyle = '#e5e8eb';
+            ctx.lineWidth = 1;
+            for(let i=0; i<=12; i++) {
+                let y = (i / 12) * canvas.height;
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+            }
+            for(let i=0; i<=3; i++) {
+                let x = (i / 3) * canvas.width;
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+            }
+
+            if (isTouching) {
+                // 제미나이 스타일 그라데이션 라인
+                let grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+                grad.addColorStop(0, '#4285f4'); grad.addColorStop(1, '#d96570');
+                ctx.strokeStyle = grad;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(0, activeY); ctx.lineTo(canvas.width, activeY);
+                ctx.moveTo(activeX, 0); ctx.lineTo(activeX, canvas.height);
+                ctx.stroke();
+            }
+            requestAnimationFrame(draw);
+        }
+
+        const start = () => { isTouching = true; gain.gain.setTargetAtTime(0.4, audioCtx.currentTime, 0.1); noteDisplay.style.opacity = 1; };
+        const stop = () => { isTouching = false; gain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.2); noteDisplay.style.opacity = 0; };
+
+        window.addEventListener('touchstart', start); window.addEventListener('touchend', stop);
+        window.addEventListener('mousedown', start); window.addEventListener('mouseup', stop);
+
+        document.getElementById('startBtn').addEventListener('click', (e) => {
+            initAudio(); canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+            draw(); e.target.style.display = 'none';
+            if (DeviceOrientationEvent.requestPermission) DeviceOrientationEvent.requestPermission();
+        });
+    </script>
+</body>
+</html>
